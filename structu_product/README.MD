@@ -362,6 +362,6 @@ La V1 contient :
 * pricer Garman-Kohlhagen ;
 * comparaison forward, vanilla, collar, risk reversal et seagull ;
 * solveur de strike pour collar zero-cost ;
-* payoff charts ;
+* payoff charts avec deux vues : `Client payoff` et `Hedge P&L` ;
 * sensibilités spot, volatilité ATM et skew/RR ;
-* recommandation desk simple.
+* lecture desk sans classement automatique : `Market Reading`, `Desk Interpretation`, `Risk Analysis`, `Trader View`.

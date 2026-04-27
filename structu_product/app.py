@@ -57,8 +57,12 @@ class StructureResult:
     protection: str
     upside: str
     tail_risk: str
+    skew_sensitivity: str
+    vol_sensitivity: str
+    when_to_use: str
+    risk_profile: str
+    short_vol_warning: str
     comment: str
-    score: float
     leg_rows: list[dict]
 
 
@@ -140,12 +144,28 @@ def inject_css() -> None:
             color: #d6dee6;
             margin: 0.55rem 0 0.85rem 0;
         }
-        .recommendation {
+        .decision-panel {
             border: 1px solid #2a6f55;
             background: #071711;
             border-radius: 8px;
             padding: 0.85rem 1rem;
             color: #d8f3e6;
+        }
+        .warning-panel {
+            border: 1px solid #7a4620;
+            background: #1a0f08;
+            border-radius: 8px;
+            padding: 0.85rem 1rem;
+            color: #f6d6bd;
+            margin: 0.55rem 0 0.85rem 0;
+        }
+        .risk-panel {
+            border: 1px solid #6c2732;
+            background: #18090d;
+            border-radius: 8px;
+            padding: 0.85rem 1rem;
+            color: #f4cbd2;
+            margin: 0.55rem 0 0.85rem 0;
         }
         .info-panel {
             border: 1px solid #1d2b38;
@@ -506,19 +526,6 @@ def get_bucket_strike(bucket_surface: pd.DataFrame, tenor: str, bucket: str) -> 
     return float(row.iloc[0]["strike"])
 
 
-def structure_score(name: str, premium_pct: float) -> float:
-    base = {
-        "Forward": (5.0, 1.0, 5.0),
-        "Vanilla": (5.0, 5.0, 5.0),
-        "Collar": (4.2, 2.7, 4.6),
-        "Risk Reversal": (4.0, 2.6, 4.1),
-        "Seagull": (3.4, 2.4, 1.7),
-    }
-    protection, upside, tail = base[name]
-    cost = max(0.0, min(5.0, 5.0 - abs(premium_pct) * 100.0))
-    return 0.35 * protection + 0.25 * cost + 0.25 * upside + 0.15 * tail
-
-
 def make_result(
     name: str,
     legs: list[Leg],
@@ -533,6 +540,11 @@ def make_result(
     protection: str,
     upside: str,
     tail_risk: str,
+    skew_sensitivity: str,
+    vol_sensitivity: str,
+    when_to_use: str,
+    risk_profile: str,
+    short_vol_warning: str,
     comment: str,
 ) -> StructureResult:
     premium_per_eur, leg_rows = price_structure(legs, bucket_surface, spot, rd, rf, maturity_years, method)
@@ -549,8 +561,12 @@ def make_result(
         protection=protection,
         upside=upside,
         tail_risk=tail_risk,
+        skew_sensitivity=skew_sensitivity,
+        vol_sensitivity=vol_sensitivity,
+        when_to_use=when_to_use,
+        risk_profile=risk_profile,
+        short_vol_warning=short_vol_warning,
         comment=comment,
-        score=structure_score(name, premium_pct),
         leg_rows=leg_rows,
     )
 
@@ -580,11 +596,11 @@ def build_structures(
         sold_type = "call"
         rr_protection_bucket = "25D Put"
         rr_sold_bucket = "25D Call"
-        forward_comment = "Bloque le taux d'achat USD, mais supprime tout upside si EUR/USD remonte."
-        vanilla_comment = "Protection forte contre une baisse EUR/USD ; la prime dépend de l'ATM vol et du skew downside."
-        collar_comment = "Compromis lisible : la protection est financée par la vente d'un upside cap."
-        rr_comment = "Structure construite sur les wings 25D ; le coût dépend directement du Risk Reversal."
-        seagull_comment = "Réduit encore la prime, mais abandonne une partie de la protection en scénario extrême."
+        forward_comment = "Bloque le taux d'achat USD, mais supprime toute participation si EUR/USD remonte."
+        vanilla_comment = "Protection clean contre une baisse EUR/USD ; la prime est le prix de cette asymétrie."
+        collar_comment = "La protection downside est financée par la vente d'un call ; plus le skew est négatif, plus il faut vendre d'upside."
+        rr_comment = "Risk Reversal 25D : achat de put wing et vente de call wing ; P&L directement exposé au skew."
+        seagull_comment = "Optimisation agressive de prime : la vente d'un put très OTM réintroduit du tail risk."
         forward_protection = "Totale"
         vanilla_protection = f"Sous {protection_strike:.4f}"
         upside = "Total"
@@ -595,11 +611,11 @@ def build_structures(
         sold_type = "put"
         rr_protection_bucket = "25D Call"
         rr_sold_bucket = "25D Put"
-        forward_comment = "Bloque le taux de vente USD, mais supprime l'upside si EUR/USD baisse."
-        vanilla_comment = "Protection forte contre une hausse EUR/USD ; la prime dépend de la call wing vol."
-        collar_comment = "La protection est financée par la vente d'une participation downside."
-        rr_comment = "Structure construite sur les wings 25D ; le coût dépend du Risk Reversal."
-        seagull_comment = "Prime plus faible, mais tail risk si EUR/USD dépasse fortement la wing haute."
+        forward_comment = "Bloque le taux de vente USD, mais supprime toute participation si EUR/USD baisse."
+        vanilla_comment = "Protection clean contre une hausse EUR/USD ; la prime dépend de la call wing vol."
+        collar_comment = "La protection upside est financée par la vente d'un put ; le skew détermine la qualité du funding."
+        rr_comment = "Risk Reversal 25D : achat de call wing et vente de put wing ; P&L directement exposé au skew."
+        seagull_comment = "Optimisation agressive de prime : la vente d'un call très OTM réintroduit du tail risk."
         forward_protection = "Totale"
         vanilla_protection = f"Au-dessus de {protection_strike:.4f}"
         upside = "Total"
@@ -649,6 +665,11 @@ def build_structures(
             forward_protection,
             "Aucun",
             "Faible",
+            "Faible",
+            "Faible",
+            "Besoin de certitude du taux, budget prime nul, aucune volonté de participer au marché favorable.",
+            "Risque principal : opportunity cost si le spot évolue favorablement après la mise en place.",
+            "",
             forward_comment,
         ),
         (
@@ -657,6 +678,11 @@ def build_structures(
             vanilla_protection,
             upside,
             "Faible",
+            "Moyenne à élevée",
+            "Élevée",
+            "Protection forte requise et client prêt à payer une prime pour conserver l'upside.",
+            "Risque limité à la prime payée ; profil long optionality, long vol.",
+            "",
             vanilla_comment,
         ),
         (
@@ -668,6 +694,11 @@ def build_structures(
             vanilla_protection,
             collar_upside,
             "Faible",
+            "Élevée",
+            "Moyenne",
+            "Priorité à la réduction de coût avec acceptation d'un upside cap.",
+            "Protection financée par option vendue ; le client échange de l'upside contre une prime plus faible.",
+            "Net short volatility exposure via option vendue.",
             collar_comment,
         ),
         (
@@ -679,6 +710,11 @@ def build_structures(
             "Wing 25D",
             collar_upside,
             "Dépend du skew",
+            "Très élevée",
+            "Moyenne",
+            "Client accepte une construction standard 25D et veut matérialiser ou neutraliser le skew.",
+            "Profil très sensible au Risk Reversal : RR = vol_call - vol_put.",
+            "Net short volatility exposure sur la wing vendue.",
             rr_comment,
         ),
         (
@@ -687,6 +723,11 @@ def build_structures(
             "Zone partielle",
             collar_upside,
             seagull_tail,
+            "Élevée",
+            "Élevée",
+            "Optimisation de prime agressive, uniquement si le client accepte un tail risk explicite.",
+            "Introduces unbounded downside exposure beyond tail strike ; la protection disparaît dans le scénario extrême.",
+            "Net short volatility exposure, souvent avec prime reçue ou coût fortement réduit.",
             seagull_comment,
         ),
     ]
@@ -706,14 +747,36 @@ def build_structures(
             protection=protection,
             upside=upside_text,
             tail_risk=tail_risk,
+            skew_sensitivity=skew_sensitivity,
+            vol_sensitivity=vol_sensitivity,
+            when_to_use=when_to_use,
+            risk_profile=risk_profile,
+            short_vol_warning=short_vol_warning,
             comment=comment,
         )
-        for name, legs, protection, upside_text, tail_risk, comment in definitions
+        for (
+            name,
+            legs,
+            protection,
+            upside_text,
+            tail_risk,
+            skew_sensitivity,
+            vol_sensitivity,
+            when_to_use,
+            risk_profile,
+            short_vol_warning,
+            comment,
+        ) in definitions
     ]
     return results, sold_strike, solved_warning
 
 
-def payoff_per_eur(result: StructureResult, terminal_spots: np.ndarray, role: str) -> np.ndarray:
+def payoff_per_eur(
+    result: StructureResult,
+    terminal_spots: np.ndarray,
+    role: str,
+    include_premium: bool = True,
+) -> np.ndarray:
     payoff = np.zeros_like(terminal_spots, dtype=float)
     is_importer = role == "USD importer"
 
@@ -725,7 +788,9 @@ def payoff_per_eur(result: StructureResult, terminal_spots: np.ndarray, role: st
         elif leg.option_type == "put":
             payoff += leg.quantity * np.maximum(leg.strike - terminal_spots, 0.0)
 
-    return payoff - result.premium_per_eur
+    if include_premium:
+        payoff -= result.premium_per_eur
+    return payoff
 
 
 def structures_table(results: list[StructureResult]) -> pd.DataFrame:
@@ -739,7 +804,9 @@ def structures_table(results: list[StructureResult]) -> pd.DataFrame:
                 "Protection": result.protection,
                 "Upside": result.upside,
                 "Tail risk": result.tail_risk,
-                "Score": result.score,
+                "Skew sensitivity": result.skew_sensitivity,
+                "Vol sensitivity": result.vol_sensitivity,
+                "When to use": result.when_to_use,
                 "Desk comment": result.comment,
             }
             for result in results
@@ -756,12 +823,19 @@ def format_pct(value: float) -> str:
     return f"{value:.2%}"
 
 
+def premium_display(result: StructureResult) -> str:
+    if result.premium_usd < -1.0:
+        return f"Net premium received (short volatility position): {format_money(abs(result.premium_usd), 'USD')}"
+    if result.premium_usd > 1.0:
+        return f"Premium paid: {format_money(result.premium_usd, 'USD')}"
+    return "Zero-cost / premium neutral"
+
+
 def styled_structure_table(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
     out["Premium USD"] = out["Premium USD"].map(lambda x: format_money(x, "USD"))
     out["Premium EUR"] = out["Premium EUR"].map(lambda x: format_money(x, "EUR"))
     out["Premium % notional"] = out["Premium % notional"].map(format_pct)
-    out["Score"] = out["Score"].map(lambda x: f"{x:.2f}/5")
     return out
 
 
@@ -775,14 +849,15 @@ def display_structure_table(results: list[StructureResult]) -> pd.DataFrame:
         rows.append(
             {
                 "Produit": result.name,
-                "Prime USD": format_money(result.premium_usd, "USD"),
+                "Coût / prime": premium_display(result),
                 "Prime EUR": format_money(result.premium_eur, "EUR"),
                 "Prime / nominal": format_pct(result.premium_pct),
                 "Protection": result.protection,
                 "Upside": result.upside,
                 "Tail risk": result.tail_risk,
-                "Score": f"{result.score:.2f}/5",
-                "Lecture desk": result.comment,
+                "Sensibilité skew": result.skew_sensitivity,
+                "Sensibilité vol": result.vol_sensitivity,
+                "When to use": result.when_to_use,
             }
         )
     return pd.DataFrame(rows)
@@ -911,18 +986,26 @@ def make_heatmap(bucket_surface: pd.DataFrame) -> go.Figure:
     return fig
 
 
-def make_payoff_chart(results: list[StructureResult], role: str, spot: float, notional_eur: float) -> go.Figure:
+def make_payoff_chart(
+    results: list[StructureResult],
+    role: str,
+    spot: float,
+    notional_eur: float,
+    view_mode: str,
+) -> go.Figure:
     terminal_spots = np.linspace(spot * 0.86, spot * 1.14, 160)
+    include_premium = view_mode == "Hedge P&L"
+    y_title = "Hedge P&L incluant prime upfront (USD)" if include_premium else "Client payoff brut à maturité hors prime (USD)"
     fig = go.Figure()
     for result in results:
-        payoff_usd = payoff_per_eur(result, terminal_spots, role) * notional_eur
+        payoff_usd = payoff_per_eur(result, terminal_spots, role, include_premium=include_premium) * notional_eur
         fig.add_trace(
             go.Scatter(
                 x=terminal_spots,
                 y=payoff_usd,
                 mode="lines",
                 name=result.name,
-                hovertemplate="Spot final: %{x:.4f}<br>Payoff hedge: USD %{y:,.0f}<extra></extra>",
+                hovertemplate="Spot final: %{x:.4f}<br>Valeur: USD %{y:,.0f}<extra></extra>",
             )
         )
     fig.add_vline(x=spot, line_width=1, line_dash="dot", line_color="#f6b642")
@@ -931,7 +1014,7 @@ def make_payoff_chart(results: list[StructureResult], role: str, spot: float, no
         height=500,
         margin=dict(l=0, r=0, t=28, b=0),
         xaxis_title="Spot final EUR/USD",
-        yaxis_title="Payoff hedge après prime (USD)",
+        yaxis_title=y_title,
         legend=dict(orientation="h", y=1.08),
     )
     return fig
@@ -1124,6 +1207,141 @@ def desk_read(quotes: pd.DataFrame, tenor: str, role: str) -> str:
     return f"{role_note} {skew} {smile}"
 
 
+def market_reading_table(quotes: pd.DataFrame, tenor: str, role: str) -> pd.DataFrame:
+    row = quotes[quotes["tenor"] == tenor].iloc[0]
+    rr25 = float(row["rr25"])
+    bf25 = float(row["bf25"])
+    put_vol = float(row["vol_25d_put"])
+    call_vol = float(row["vol_25d_call"])
+    role_flow = "USD importers" if role == "USD importer" else "USD exporters"
+
+    if rr25 < -0.05:
+        skew_read = "Skew négatif : vol_put > vol_call. Le marché paie davantage la protection contre une baisse EUR/USD."
+        flow_read = "Lecture flows : demande typique de protection EUR downside, souvent liée à des hedgers/importateurs USD."
+        pricing_read = "Impact pricing : puts plus chers, donc Collar plus difficile à financer sans vendre davantage d'upside."
+    elif rr25 > 0.05:
+        skew_read = "Skew positif : vol_call > vol_put. Le marché paie davantage la protection contre une hausse EUR/USD."
+        flow_read = "Lecture flows : demande de protection EUR upside, souvent liée à des hedgers/exportateurs USD ou macro accounts."
+        pricing_read = "Impact pricing : calls plus chers, donc les structures d'exportateur coûtent plus cher à financer."
+    else:
+        skew_read = "Skew proche de zéro : les wings 25D sont relativement équilibrées."
+        flow_read = "Lecture flows : pas de biais directionnel fort visible dans les quotes 25D."
+        pricing_read = "Impact pricing : Collar et Risk Reversal sont moins pénalisés par le skew."
+
+    return pd.DataFrame(
+        [
+            {"Point desk": "Formule RR", "Lecture": f"25D RR = vol_call - vol_put = {call_vol:.3f}% - {put_vol:.3f}% = {rr25:.3f} vol pts."},
+            {"Point desk": "Skew", "Lecture": skew_read},
+            {"Point desk": "Flows probables", "Lecture": flow_read},
+            {"Point desk": "Client concerné", "Lecture": f"Le cas courant est {role_fr(role)} ; les contraintes de {role_flow} changent le choix du hedge."},
+            {"Point desk": "Pricing impact", "Lecture": pricing_read},
+            {"Point desk": "Convexité", "Lecture": f"25D BF = {bf25:.3f} vol pts : mesure la prime de smile/wing demandée par le marché."},
+        ]
+    )
+
+
+def desk_interpretation_table(results: list[StructureResult], role: str) -> pd.DataFrame:
+    role_text = "importateur USD" if role == "USD importer" else "exportateur USD"
+    lookup = {result.name: result for result in results}
+    rows = [
+        {
+            "Objectif client": "Budget prime nul ou très limité",
+            "Trade-off desk": "Le coût est réduit en vendant de l'upside ou une wing ; le client accepte une contrainte future.",
+            "Structures plus adaptées": f"Forward, Collar, Risk Reversal. À comparer : {premium_display(lookup['Collar'])}.",
+        },
+        {
+            "Objectif client": "Protection clean et board-friendly",
+            "Trade-off desk": "Le client paie une prime explicite mais garde un profil asymétrique simple.",
+            "Structures plus adaptées": f"Vanilla. Prime indicative : {premium_display(lookup['Vanilla'])}.",
+        },
+        {
+            "Objectif client": "Participation favorable au marché",
+            "Trade-off desk": "Plus l'upside conservé est important, plus le coût initial ou le niveau de protection devient contraignant.",
+            "Structures plus adaptées": "Vanilla si le budget existe ; Collar si le client accepte un upside cap.",
+        },
+        {
+            "Objectif client": "Optimisation agressive de prime",
+            "Trade-off desk": "La prime peut devenir très faible ou reçue, mais le tail risk doit être explicitement validé.",
+            "Structures plus adaptées": f"Seagull uniquement pour un {role_text} acceptant le scénario extrême.",
+        },
+    ]
+    return pd.DataFrame(rows)
+
+
+def trader_view_table(quotes: pd.DataFrame, tenor: str) -> pd.DataFrame:
+    row = quotes[quotes["tenor"] == tenor].iloc[0]
+    atm = float(row["atm_vol"])
+    rr25 = float(row["rr25"])
+    bf25 = float(row["bf25"])
+    atm_median = float(quotes["atm_vol"].median())
+    rr_abs_median = float(quotes["rr25"].abs().median())
+    bf_median = float(quotes["bf25"].median())
+
+    vol_read = "riche vs courbe" if atm > atm_median else "cheap vs courbe"
+    skew_read = "steep" if abs(rr25) > rr_abs_median else "flat/modéré"
+    convexity_read = "convexité riche" if bf25 > bf_median else "convexité modérée/cheap"
+
+    ideas = [
+        {
+            "Angle": "Vol level",
+            "Lecture": f"{tenor} ATM vol = {atm:.3f}% vs médiane courbe {atm_median:.3f}% : {vol_read}.",
+            "Idées à discuter": "Comparer achat de protection vs structures financées ; attention au carry de prime.",
+        },
+        {
+            "Angle": "Skew / RR",
+            "Lecture": f"25D RR = {rr25:.3f} vol pts ; skew {skew_read}.",
+            "Idées à discuter": "Risk Reversal ou Collar peuvent exprimer le skew, mais ce n'est pas un conseil de trade.",
+        },
+        {
+            "Angle": "Wings / BF",
+            "Lecture": f"25D BF = {bf25:.3f} vol pts vs médiane {bf_median:.3f}% : {convexity_read}.",
+            "Idées à discuter": "Si convexité riche, vente de wings possible seulement avec limites de tail risk très claires.",
+        },
+    ]
+    return pd.DataFrame(ideas)
+
+
+def worst_case_spot(role: str, spot: float) -> float:
+    return spot * (0.72 if role == "USD importer" else 1.28)
+
+
+def risk_analysis_table(results: list[StructureResult], role: str, spot: float, notional_eur: float) -> pd.DataFrame:
+    grid = np.linspace(spot * 0.72, spot * 1.28, 240)
+    stress_spot = worst_case_spot(role, spot)
+    rows = []
+    for result in results:
+        pnl_grid = payoff_per_eur(result, grid, role, include_premium=True) * notional_eur
+        worst_idx = int(np.argmin(pnl_grid))
+        stress_pnl = payoff_per_eur(result, np.array([stress_spot]), role, include_premium=True)[0] * notional_eur
+        short_vol = result.short_vol_warning
+        if result.premium_usd < -1.0:
+            short_vol = "Net premium received (short volatility position). " + short_vol
+        rows.append(
+            {
+                "Produit": result.name,
+                "Risk profile": result.risk_profile,
+                "Short vol warning": short_vol or "Pas de short optionality directe.",
+                "Worst point in grid": f"Spot {grid[worst_idx]:.4f} / {format_money(float(pnl_grid[worst_idx]), 'USD')}",
+                "Stress tail scenario": f"Spot {stress_spot:.4f} / {format_money(float(stress_pnl), 'USD')}",
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def premium_warning_table(results: list[StructureResult]) -> pd.DataFrame:
+    rows = []
+    for result in results:
+        if result.premium_usd < -1.0:
+            rows.append(
+                {
+                    "Produit": result.name,
+                    "Message": "Net premium received (short volatility position)",
+                    "Lecture desk": "La prime reçue rémunère une contrainte vendue au client : upside cap, wing vendue ou tail risk. Ce n'est pas de l'argent gratuit.",
+                }
+            )
+    return pd.DataFrame(rows)
+
+
 def header(spot: float, rd: float, rf: float, quotes: pd.DataFrame, tenor: str) -> None:
     row = quotes[quotes["tenor"] == tenor].iloc[0]
     st.markdown(
@@ -1162,7 +1380,7 @@ def main() -> None:
     with st.sidebar.expander("Marché", expanded=True):
         uploaded = st.file_uploader("CSV marché", type=["csv"])
         st.caption("Format attendu : tenor, ATM vol, RR/BF 25D et 10D. Le fichier `data.csv` est chargé par défaut.")
-        spot = st.number_input("Spot EUR/USD", min_value=0.0001, value=1.0725, step=0.0005, format="%.4f")
+        spot = st.number_input("Spot EUR/USD", min_value=0.0001, value=1.1700, step=0.0005, format="%.4f")
 
     with st.sidebar.expander("Taux et méthode", expanded=False):
         rd = st.number_input("USD rate", value=4.25, step=0.05, format="%.2f", help="Taux domestic pour EUR/USD.") / 100.0
@@ -1235,7 +1453,6 @@ def main() -> None:
         notional_eur=notional_eur,
         notional_usd_ref=notional_usd_ref,
     )
-    recommendation = max(results, key=lambda item: item.score)
 
     header(spot, rd, rf, quotes, tenor)
 
@@ -1251,30 +1468,16 @@ def main() -> None:
         col2.metric("Nominal réf. USD", format_money(notional_usd_ref, "USD"))
         col3.metric("Maturité", f"{tenor} / {maturity_years:.2f}Y")
         col4.metric("Forward", f"{forward_rate(spot, rd, rf, maturity_years):.4f}")
-        col5.metric("Recommandation", recommendation.name)
+        col5.metric("Desk stance", "Trade-off")
 
         col_a, col_b = st.columns([0.92, 1.28])
         with col_a:
-            st.markdown("#### Conclusion immédiate")
-            st.markdown(
-                f"""
-                <div class="recommendation">
-                <b>{recommendation.name}</b> est la structure proposée pour ce cas.
-                Le scoring V1 privilégie une protection forte, une prime contenue, un upside préservé
-                et un tail risk limité.
-                <br><br>
-                Prime estimée : <b>{format_money(recommendation.premium_usd, "USD")}</b>
-                ({format_pct(recommendation.premium_pct)} du nominal USD de référence).
-                <br><br>
-                {recommendation.comment}
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown("#### Hypothèses visibles")
+            st.markdown("#### 1. Market Inputs")
             st.dataframe(
                 pd.DataFrame(
                     [
+                        {"Champ": "Profil client", "Valeur": role_fr(role)},
+                        {"Champ": "Nominal", "Valeur": f"{notional:,.0f} {notional_ccy}"},
                         {"Champ": "Spot", "Valeur": f"{spot:.4f}"},
                         {"Champ": f"{tenor} ATM vol", "Valeur": f"{current_row['atm_vol']:.3f}%"},
                         {"Champ": f"{tenor} 25D RR", "Valeur": f"{current_row['rr25']:.3f}vp"},
@@ -1288,18 +1491,29 @@ def main() -> None:
                 hide_index=True,
             )
         with col_b:
-            st.markdown("#### Surface de volatilité")
+            st.markdown("#### 2. Vol Surface")
             surface_fig = make_surface_figure(bucket_surface)
             surface_fig.update_layout(height=470, margin=dict(l=0, r=0, t=10, b=0))
             st.plotly_chart(surface_fig, width="stretch")
 
-        st.markdown("#### Comparaison desk")
+        st.markdown("#### 3. Market Reading (Desk)")
+        st.dataframe(market_reading_table(quotes, tenor, role), width="stretch", hide_index=True)
+
+        st.markdown("#### 4. Structures Comparison")
         st.dataframe(display_structure_table(results), width="stretch", hide_index=True)
+
+        warnings_df = premium_warning_table(results)
+        if not warnings_df.empty:
+            st.dataframe(warnings_df, width="stretch", hide_index=True)
 
         col_c, col_d = st.columns([1.18, 0.82])
         with col_c:
-            st.markdown("#### Payoff chart")
-            payoff_fig = make_payoff_chart(results, role, spot, notional_eur)
+            st.markdown("#### 5. Payoff Analysis")
+            payoff_mode = st.radio("View", ["Client payoff", "Hedge P&L"], horizontal=True)
+            st.caption(
+                "Hypothèses : options européennes, exercice à maturité, settlement cash en USD, primes intégrées uniquement en mode Hedge P&L."
+            )
+            payoff_fig = make_payoff_chart(results, role, spot, notional_eur, payoff_mode)
             payoff_fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0))
             st.plotly_chart(payoff_fig, width="stretch")
         with col_d:
@@ -1307,6 +1521,18 @@ def main() -> None:
             heatmap_fig = make_heatmap(bucket_surface)
             heatmap_fig.update_layout(height=380, margin=dict(l=0, r=0, t=10, b=0))
             st.plotly_chart(heatmap_fig, width="stretch")
+
+        st.markdown("#### 6. Risk Analysis")
+        st.dataframe(risk_analysis_table(results, role, spot, notional_eur), width="stretch", hide_index=True)
+
+        col_e, col_f = st.columns([1.08, 0.92])
+        with col_e:
+            st.markdown("#### 7. Desk Interpretation")
+            st.dataframe(desk_interpretation_table(results, role), width="stretch", hide_index=True)
+        with col_f:
+            st.markdown("#### 8. Trader View")
+            st.caption("Idées de discussion, pas un conseil de trade.")
+            st.dataframe(trader_view_table(quotes, tenor), width="stretch", hide_index=True)
 
     elif page == "Atelier":
         data_tab, pricer_tab, stress_tab, reglages_tab = st.tabs(["Data", "Pricer", "Stress tests", "Réglages"])
@@ -1361,9 +1587,9 @@ def main() -> None:
 
             st.markdown(
                 f"""
-                <div class="recommendation">
-                Structure recommandée : <b>{recommendation.name}</b>, score <b>{recommendation.score:.2f}/5</b>.
-                La règle privilégie protection forte, prime faible, upside conservé et tail risk limité.
+                <div class="decision-panel">
+                Pas de classement automatique : le choix dépend de la contrainte client.
+                Le pricer compare coût, protection, upside, skew et tail risk.
                 </div>
                 """,
                 unsafe_allow_html=True,
@@ -1373,7 +1599,11 @@ def main() -> None:
             st.dataframe(display_structure_table(results), width="stretch", hide_index=True)
 
             st.markdown("#### Payoff chart")
-            st.plotly_chart(make_payoff_chart(results, role, spot, notional_eur), width="stretch")
+            payoff_mode_detail = st.radio("View", ["Client payoff", "Hedge P&L"], horizontal=True, key="payoff_detail")
+            st.caption(
+                "Client payoff : payoff brut à maturité hors prime. Hedge P&L : payoff incluant la prime upfront."
+            )
+            st.plotly_chart(make_payoff_chart(results, role, spot, notional_eur, payoff_mode_detail), width="stretch")
 
             with st.expander("Détail des legs"):
                 selected_structure = st.selectbox("Produit", [result.name for result in results])
